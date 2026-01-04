@@ -66,79 +66,136 @@ Set the root directory for MegaEngine data (default: `~/.megaengine`):
 export MEGAENGINE_ROOT=/path/to/megaengine-data
 ```
 
-## 🚀 Usage
 
-### 1. Initialize Keypair
+## Example: Two-Node Network with Repository Synchronization
 
-Generate a new cryptographic keypair (EdDSA):
+This example demonstrates how to set up a two-node network where the first node adds a repository, and the second node automatically synchronizes and clones it.
 
+### Prerequisites
+
+- Create a test Git repository (or use an existing one):
+  ```bash
+  mkdir -p E:\git_test\tiny
+  cd E:\git_test\tiny
+  git init
+  # Add some content
+  git add .
+  git commit -m "Initial commit"
+  ```
+
+### Step 1: Initialize Keypairs for Both Nodes
+
+**Terminal 1** - Initialize the first node's keypair:
 ```bash
 cargo run -- auth init
 ```
 
-Output:
-```
-Keypair saved to <root>/.megaengine/keypair.json
-```
-
-### 2. Start a Node
-
-Start a MegaEngine node that listens on a QUIC endpoint:
-
+**Terminal 2** - Initialize the second node's keypair with a custom root directory:
 ```bash
-cargo run -- node start \
-  --alias my-node \
-  --addr 0.0.0.0:9000 \
-  --cert-path cert
+cargo run -- --root ~/.megaengine2 auth init
 ```
 
-The node will:
-- Initialize QUIC server on the specified address
-- Start gossip protocol for peer discovery
-- Periodically announce node and repository information
-- Listen indefinitely until Ctrl+C
+Output will show the keypair location and the DID key for each node.
 
-### 3. Get Node ID
+### Step 2: Start Both Nodes
 
-Display the node ID (based on your keypair):
-
+**Terminal 1** - Start the first node (node1):
 ```bash
-cargo run -- node id
+cargo run -- node start --alias node1 --addr 127.0.0.1:9000 --cert-path cert
 ```
 
-Output:
-```
-did:key:z2DXbAovGq5vNKpXVFyrhVLppMdUCmV1hCNjbUydLMEWasE
-```
+Keep this terminal running.
 
-### 4. Register a Repository
-
-Add a local Git repository to the network:
-
+**Terminal 2** - Start the second node (node2) with node1 as bootstrap node:
 ```bash
-cargo run -- repo add \
-  --path /path/to/git/repo \
-  --description "My repository"
+cargo run -- --root ~/.megaengine2 node start --alias node2 --cert-path cert --bootstrap-node did:key:z2DUYGZos3YrXrD4pQ9aAku2g7btumKcfTiMSyBC8btqFDJ@127.0.0.1:9000 --addr 127.0.0.1:9001
 ```
 
-The repo ID is automatically generated from the Git root commit hash and the node's public key.
+Keep this terminal running as well.
 
-### 5. Clone a Repository
+**Note**: Replace `did:key:z2DUYGZos3YrXrD4pQ9aAku2g7btumKcfTiMSyBC8btqFDJ` with the actual DID key from the first node's auth init output.
 
-Clone a repository from bundle using its repo ID:
+### Step 3: Add Repository to Node1
 
+**Terminal 3** - Add a repository on node1:
 ```bash
-cargo run -- repo clone \
-  --repo-id <repo_id> \
-  --output /path/to/clone
+cargo run -- repo add --path /path/to/git_test/tiny --description "Tiny"
 ```
 
-Requirements:
-- Repository must exist in the database
-- Bundle file must be downloaded (via automatic sync or transfer)
+The output will display the repo ID. Save this ID for later use.
 
+### Step 4: Node2 Automatically Synchronizes
 
-## 🧪 Testing
+The second node will automatically:
+1. Discover the repository announcement via gossip protocol
+2. Periodically request the bundle from node1 (every 60 seconds by default)
+3. Download the bundle file
+4. Store it locally
+
+Monitor the output from Terminal 2 to see the synchronization progress.
+
+### Step 5: Query Repository on Node2
+
+**Terminal 3** - List repositories on node2:
+```bash
+cargo run -- --root ~/.megaengine2 repo list
+```
+
+You should see the "Tiny" repository announced by node1.
+
+### Step 6: Clone Repository from Node2
+
+**Terminal 3** - Clone the repository on node2:
+```bash
+cargo run -- --root ~/.megaengine2 repo clone --repo-id <repo_id> --output ./tiny
+```
+
+Replace `<repo_id>` with the ID from Step 3.
+
+The cloned repository will be available at `./tiny` on node2.
+
+### Step 7: Repository Update Synchronization
+
+When the repository creator (node1) pushes new commits, node2 will automatically synchronize them.
+
+**Terminal 3** - Make a change in the original repository on node1:
+```bash
+cd E:\git_test\tiny
+# Add or modify some files
+echo "Updated content" >> README.md
+git add README.md
+git commit -m "Update repository"
+```
+
+**Terminal 3** - Update the repository bundle on node1:
+```bash
+cargo run -- repo list
+```
+
+You'll see the status indicator changes to `⚠️  HAS UPDATES`, showing new commits are available.
+
+**Terminal 3** - Node2 will automatically discover and download the updated bundle
+
+Monitor Terminal 2 output - you should see automatic bundle sync activity. The background task runs every 60 seconds and will:
+1. Detect the repository update announcement via gossip protocol
+2. Request the updated bundle from node1
+3. Download and store the new bundle
+
+**Terminal 3** - Check repository status on node2:
+```bash
+cargo run -- --root ~/.megaengine2 repo list
+```
+
+You should see the repository status has changed, indicating updates are available.
+
+**Terminal 3** - Pull the latest updates to the cloned repository on node2:
+```bash
+cargo run -- --root ~/.megaengine2 repo pull --repo-id <repo_id>
+```
+
+Replace `<repo_id>` with the repository ID from Step 3.
+
+The cloned repository at `./tiny` will be updated with the latest commits from the bundle.
 
 
 
